@@ -1,7 +1,7 @@
-# Code for Picardi et al., "Fitness consequences of alternative behavioral 
-# tactics in response to anthropogenic tradeoffs"
+# Code for Picardi et al. XXXX
+# "Fitness consequences of anthropogenic subsidies for a partially migratory wading bird"
 
-# Load packages ----
+# Load packages ####
 
 library(sf)
 library(terra)
@@ -12,67 +12,134 @@ library(nestR)
 library(rjags)
 library(coda)
 
-# Load data ----
+# Load WOST data ####
 
-# Load raster of distance from urban
-dist_urb_r <- rast("input/distance_to_urban_raster.tiff")
-# Load WOST GPS data for breeding attempts
-attempts <- readRDS("../partmigenv/output/nesting_attempts_110.rds")
-attempts_raw <- readRDS("../partmigenv/output/nesting_attempts.rds")
-# Load data on individual migratory behavior
-mig_yrs <- readRDS("../partmigenv/output/mig_yrs.rds")
-# Load data on nests
-ws_nests <- readRDS("../partmigenv/output/ws_nests_all.rds")
+# Load GPS data for adult WOST
+gps <- readRDS("input/GPS_WOST_adults.rds")
 
-# Process data ----
+# Load data on annual individual migratory behavior. This object was generated
+# using methods described in Picardi, S., Frederick, P. C., Borkhataria, R. R.,
+# & Basille, M. (2020). Partial migration in a subtropical wading bird in the
+# southeastern United States. Ecosphere, 11(2), e03054.
+mig_yrs <- readRDS("input/mig_years.rds")
+
+# Find nesting attempts ####
+
+# Use parameter values described in Picardi, S., Smith, B. J., Boone, M. E.,
+# Frederick, P. C., Cecere, J. G., Rubolini, D., ... & Basille, M. (2020).
+# Analysis of movement recursions to detect reproductive events and estimate
+# their fate in central place foragers. Movement Ecology, 8(1), 1-14.
+
+ws_nests <- find_nests(gps_data = gps,
+                       buffer = 40,
+                       sea_start = "11-01",
+                       sea_end = "10-31",
+                       nest_cycle = 110,
+                       min_d_fix = 5,
+                       min_consec = 14,
+                       min_top_att = 79,
+                       min_days_att = 1,
+                       min_pts = 2,
+                       discard_overlapping = TRUE)
+
+# Isolate GPS data within nesting attempts ####
+
+get_attempts <- function(nest_info,
+                         nest_cycle = 110) {
+
+  # Create unique attempt identifier
+  attempts <- nest_info$nests %>%
+    mutate(attempt_id = paste0(burst, "-", loc_id))
+
+  # Initialize output
+  output <- data.frame()
+
+  # Loop over attempts
+  for (i in 1:nrow(attempts)) {
+
+    # Select current attempt
+    att <- attempts[i,]
+
+    # Data on nest revisits
+    visits <- nest_info$visits %>%
+      filter(burst == att$burst)
+
+    # Cut between attempt start and end of nesting cycle
+    visits <- visits %>%
+      filter(between(date,
+                     att$attempt_start,
+                     att$attempt_end)) %>%
+      mutate(att_id = att$attempt_id) %>%
+      mutate(day_of_att = floor(as.numeric(difftime(as_date(date), att$attempt_start, units = "days"))) + 1) %>%
+      dplyr::select(att_id, burst, date, day_of_att, long, lat, loc_id)
+
+    # Append to output
+    output <- rbind(output, visits)
+
+  }
+
+  return(output)
+
+}
+
+nest_att <- get_attempts(ws_nests)
+
+# Make date and datetime two distinct columns
+nest_att$datetime <- nest_att$date
+nest_att$date <- as_date(nest_att$date)
+
+# Process data ####
+
+# Format the data so that I can join the nesting attempts data with the
+# migratory behavior data.
 
 # Fix burst column to match between data frames
 mig_yrs$burst <- paste0(mig_yrs$stork, "-", mig_yrs$year)
 
 # Fix att_id column to match between data frames
-ws_nests$nests$att_id <- paste0(ws_nests$nests$burst, "-", 
+ws_nests$nests$att_id <- paste0(ws_nests$nests$burst, "-",
                                 ws_nests$nests$loc_id)
-ws_nests$visits$att_id <- paste0(ws_nests$visits$burst, "-", 
+ws_nests$visits$att_id <- paste0(ws_nests$visits$burst, "-",
                                  ws_nests$visits$loc_id)
 
-# Join raw attempts data with migration data and with environmental data
-nesting_data <- left_join(attempts_raw, mig_yrs, by = "burst") %>% 
-  dplyr::select(att_id, burst, stork, choice, strategy, flexible, 
+# Join raw attempts data with migration data
+nesting_data <- left_join(attempts_raw, mig_yrs, by = "burst") %>%
+  dplyr::select(att_id, burst, stork, choice, strategy, flexible,
                 day_of_att, date, datetime, long, lat, loc_id)
 
 # Keep only birds for which I know the migratory choice and mutate date column
-nesting_data <- nesting_data %>% 
-  filter(!is.na(choice)) %>% 
+nesting_data <- nesting_data %>%
+  filter(!is.na(choice)) %>%
   mutate(date_ymd = date)
 
 # Join location of the nest
-nest_coords <- ws_nests$nests %>% dplyr::select(att_id, 
-                                                nest_long = long, 
+nest_coords <- ws_nests$nests %>% dplyr::select(att_id,
+                                                nest_long = long,
                                                 nest_lat = lat)
 nesting_data <- nesting_data %>% left_join(nest_coords, by = "att_id")
 
 # All nests corresponding to the attempts in nesting_data
-nest_loc_data <- nesting_data %>% 
-  distinct(att_id, choice, nest_long, nest_lat) %>% 
+nest_loc_data <- nesting_data %>%
+  distinct(att_id, choice, nest_long, nest_lat) %>%
   arrange(desc(nest_lat))
 
 # Load coastline shapefile
-coastline <- read_sf(dsn = "input/fl_bnd/fl_bnd.shp", layer = "fl_bnd") %>% 
-  filter(SHAPE_FID < 26) %>% 
+coastline <- read_sf(dsn = "input/fl_bnd/fl_bnd.shp", layer = "fl_bnd") %>%
+  filter(SHAPE_FID < 26) %>%
   dplyr::select(1)
 
 coastline <- st_transform(coastline, 32617)
 
 # Retain used foraging points within FL only
-nesting_data <- nesting_data %>% 
-  filter(lat < 30.828 & loc_id == 0) 
+nesting_data <- nesting_data %>%
+  filter(lat < 30.828 & loc_id == 0)
 
-# Fit distribution to empirical ----
+# Fit step length distribution to generate available points ####
 
 # Fit an exponential distribution to the observed steps
 fitexp <- nesting_data %>%
-  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>% 
-  pull(dist_to_nest) %>% 
+  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>%
+  pull(dist_to_nest) %>%
   fitdistr("exponential")
 
 # Plot probability density function
@@ -98,16 +165,16 @@ system.time({
     tracker = tracker + 1
     print(paste(tracker, "of", length(ids)))
     # Get the data for this attempt
-    dat <- nesting_data %>% filter(att_id == i) %>% 
-      mutate(used = 1) %>% 
-      dplyr::select(att_id, burst, stork, choice, date_ymd, datetime, 
+    dat <- nesting_data %>% filter(att_id == i) %>%
+      mutate(used = 1) %>%
+      dplyr::select(att_id, burst, stork, choice, date_ymd, datetime,
                     day_of_att, long, lat, loc_id,
-                    nest_long, nest_lat, used) %>% 
-      mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))) 
+                    nest_long, nest_lat, used) %>%
+      mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat)))
     # Make nest spatial
-    nest <- dat %>% 
-      dplyr::select(nest_long, nest_lat) %>% 
-      unique() %>% 
+    nest <- dat %>%
+      dplyr::select(nest_long, nest_lat) %>%
+      unique() %>%
       st_as_sf(coords = c("nest_long", "nest_lat"), crs = 4326)
     # Convert to UTM
     nest_utm <- st_transform(nest, 32617)
@@ -115,10 +182,10 @@ system.time({
     buff <- st_buffer(x = nest_utm, dist = units::set_units(max_dist, km))
     # Clip it to the coastline
     buff_clip <- st_intersection(buff, coastline)
-    
+
     if (length(is.na(buff_clip$geometry)) != 0) {
       #Get the coordinates of the nest
-      coords_nest <- data.frame("x" = st_coordinates(nest_utm)[, 1], 
+      coords_nest <- data.frame("x" = st_coordinates(nest_utm)[, 1],
                                 "y" = st_coordinates(nest_utm)[, 2])
       n_pts <- nrow(dat)*10
       #Vector of distances from nest (in meters)
@@ -134,131 +201,108 @@ system.time({
       rand <- st_as_sf(rand, coords = c("X", "Y"))
       st_crs(rand) <- 32617
       #Clip just those within the coastline
-      rand <- rand %>% 
-        st_as_sf() %>% 
-        st_intersection(coastline) %>% 
+      rand <- rand %>%
+        st_as_sf() %>%
+        st_intersection(coastline) %>%
         #And keep only the desired amount
         sample_n(size = n_pts)
       #Add the other attributes
-      rand <- rand %>% 
-        st_transform(4326) %>% 
-        st_coordinates() %>% 
-        as.data.frame() %>% 
+      rand <- rand %>%
+        st_transform(4326) %>%
+        st_coordinates() %>%
+        as.data.frame() %>%
         mutate(att_id = i,
                burst = unique(dat$burst),
                stork = unique(dat$stork),
                choice = unique(dat$choice),
                date_ymd = NA,
                datetime = NA,
-               day_of_att = NA, 
+               day_of_att = NA,
                long = X,
                lat = Y,
                loc_id = 0,
                nest_long = unique(dat$nest_long),
                nest_lat = unique(dat$nest_lat),
-               used = 0) %>% 
+               used = 0) %>%
         dplyr::select(att_id, burst, stork, choice, date_ymd, datetime,
-                      day_of_att, long, lat, loc_id, nest_long, nest_lat, used) %>% 
-        mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))) 
-      
+                      day_of_att, long, lat, loc_id, nest_long, nest_lat, used) %>%
+        mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat)))
+
       dat <- rbind(dat, rand)
       urban_rsf_data <- rbind(urban_rsf_data, dat)
-      
+
     }
   }
   beepr::beep(3)
 })
 
 # Check resulting distribution
-urban_rsf_data %>% 
-  filter(used == 0) %>% 
-  mutate(dist_to_nest_km = dist_to_nest/1000) %>% 
-  pull(dist_to_nest_km) %>% 
+urban_rsf_data %>%
+  filter(used == 0) %>%
+  mutate(dist_to_nest_km = dist_to_nest/1000) %>%
+  pull(dist_to_nest_km) %>%
   hist(freq = FALSE, breaks = 40)
 lines(x = fit_pdf$x, y = fit_pdf$y, col = "red")
 
-# Map results (takes a while)
-# urban_rsf_data %>% 
-#   filter(used == 0) %>% 
-#   ggplot(aes(x = long, y = lat, group = att_id)) +
-#   geom_point() +
-#   facet_wrap(~att_id) +
-#   geom_point(aes(x = nest_long, y = nest_lat), col = "red")
-
-# Check that everyone was paired (same number of att_id for used and available):
-# some birds might have nested outside of FL and we are clipping the buffers to the FL coastline
-urban_rsf_data %>% 
-  as.data.frame() %>% 
-  filter(used==1) %>% 
-  group_by(att_id) %>% 
-  tally() %>% 
-  arrange(n)
-
-urban_rsf_data %>% 
-  as.data.frame() %>% 
-  filter(used==0) %>% 
-  group_by(att_id) %>% 
-  tally() %>% 
-  arrange(n)
-
-table(urban_rsf_data$used)
-
-# Prep for model fitting ----
+# Prep for RSF fitting ####
 
 # Reproject into UTMs
-urban_rsf_data <- urban_rsf_data %>% 
-  rename(x = long, y = lat) %>% 
-  st_as_sf(coords = c("x", "y"), crs = 4326) %>% 
+urban_rsf_data <- urban_rsf_data %>%
+  rename(x = long, y = lat) %>%
+  st_as_sf(coords = c("x", "y"), crs = 4326) %>%
   st_transform(crs = 32617)
 
+# Load raster of distance to urban
+dist_urb_r <- rast("input/distance_to_urban_raster.tiff")
+
 # Calculate distance of each point to urban
-urban_rsf_data$dist_to_urban <- terra::extract(dist_urb_r, 
-                                        st_coordinates(urban_rsf_data))[, 1]
+urban_rsf_data$dist_to_urban <- terra::extract(dist_urb_r,
+                                               st_coordinates(urban_rsf_data))[, 1]
 
 # Transform to data frame
-urban_rsf_df <- as.data.frame(urban_rsf_data) %>% 
-  cbind(st_coordinates(urban_rsf_data)) %>% 
-  dplyr::select(-geometry) %>% 
+urban_rsf_df <- as.data.frame(urban_rsf_data) %>%
+  cbind(st_coordinates(urban_rsf_data)) %>%
+  dplyr::select(-geometry) %>%
   rename(utm_x = X, utm_y = Y)
 
 # Scale and center variables
 mean_dist <- mean(urban_rsf_df$dist_to_urban)
 sd_dist <- sd(urban_rsf_df$dist_to_urban)
 
-urban_rsf_scaled <- urban_rsf_df %>% 
+urban_rsf_scaled <- urban_rsf_df %>%
   mutate(dist_to_urban = (dist_to_urban - mean_dist)/sd_dist,
          weight = case_when(
            used == 1 ~ 1,
            used == 0 ~ 10000
          ))
 
-# Run model ----
+# Run RSF ####
 
 mod <- glm(formula = used ~ dist_to_urban*choice + I(dist_to_urban^2)*choice,
-              data = urban_rsf_scaled, family = binomial, weights = weight)
+           data = urban_rsf_scaled, family = binomial, weights = weight)
 
-# Model predictions ----
+# RSF predictions ####
 
-urban_rsf_df %>% 
-  filter(used == 1) %>% 
+urban_rsf_df %>%
+  filter(used == 1) %>%
   summarize(max(dist_to_urban))
 
 pred_df <- data.frame(
   choice = rep(c("migrant", "resident"), each = 100),
-  dist_to_urban_orig = seq(0, 45000, length.out = 100)) %>% 
+  dist_to_urban_orig = seq(0, 45000, length.out = 100)) %>%
   mutate(dist_to_urban = (dist_to_urban_orig - mean_dist)/sd_dist, # unscale
          dist_to_urban_km = dist_to_urban_orig/1000)
 
-urban_rsf_df %>% 
-  filter(used == 1) %>% 
+urban_rsf_df %>%
+  filter(used == 1) %>%
   summarize(mean(dist_to_urban))
 
 refd <- data.frame(
   choice = c("migrant", "resident"),
-  dist_to_urban_orig = 45000/2) %>% 
+  dist_to_urban_orig = 45000/2) %>%
   mutate(dist_to_urban = (dist_to_urban_orig - mean_dist)/sd_dist, # unscale
          dist_to_urban_km = dist_to_urban_orig/1000)
-  
+
 pred <- predict(mod, newdata = pred_df, type = "response", se.fit = TRUE)
 ref_pred <- predict(mod, newdata = refd, type = "response", se.fit = TRUE)
 
@@ -275,21 +319,23 @@ upr_ref <- ref_pred$fit + 1.96 * ref_pred$se.fit
 upr <- c(upr_pred[1:100]/upr_ref[1], upr_pred[101:200]/upr_ref[2])
 pred_df$upr <- upr
 
-n_used <- urban_rsf_df %>% 
-  filter(used == 1) %>% 
+n_used <- urban_rsf_df %>%
+  filter(used == 1) %>%
   nrow()
 
-n_avail <- urban_rsf_df %>% 
-  filter(used == 0) %>% 
+n_avail <- urban_rsf_df %>%
+  filter(used == 0) %>%
   nrow()
 
-mig_used <- urban_rsf_df %>% 
-  filter(choice == "migrant" & used == 1) %>% 
+mig_used <- urban_rsf_df %>%
+  filter(choice == "migrant" & used == 1) %>%
   mutate(dist_to_urban_km = dist_to_urban/1000)
 
-res_used <- urban_rsf_df %>% 
-  filter(choice == "resident" & used == 1) %>% 
+res_used <- urban_rsf_df %>%
+  filter(choice == "resident" & used == 1) %>%
   mutate(dist_to_urban_km = dist_to_urban/1000)
+
+# Plot RSF results ####
 
 ggplot(pred_df, aes(x = dist_to_urban_km, y = rss, col = choice)) +
   geom_ribbon(aes(ymin = lwr, ymax = upr, fill = choice), alpha = 0.2) +
@@ -303,60 +349,57 @@ ggplot(pred_df, aes(x = dist_to_urban_km, y = rss, col = choice)) +
   scale_fill_viridis_d("Tactic", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
   theme_bw()
 
-ggsave("output/2023-11-08_RSF.tiff", 
-       width = 180, height = 90, units = "mm", compression = "lzw", dpi = 600)
-
-# Nest survival ----
+# Nest survival ####
 
 # Calculate distance from urban
 dist_urb_r_ll <- terra::project(dist_urb_r, "epsg:4326")
 
-nesting_data <- st_as_sf(nesting_data, 
+nesting_data <- st_as_sf(nesting_data,
                          coords = c("long", "lat"),
                          crs = 4326)
 
-nesting_data$dist_to_urban <- terra::extract(dist_urb_r_ll, 
-                                      st_coordinates(nesting_data))[, 1]
+nesting_data$dist_to_urban <- terra::extract(dist_urb_r_ll,
+                                             st_coordinates(nesting_data))[, 1]
 
-nesting_data2 <- as.data.frame(nesting_data) %>% 
-  cbind(st_coordinates(nesting_data)) %>% 
+nesting_data2 <- as.data.frame(nesting_data) %>%
+  cbind(st_coordinates(nesting_data)) %>%
   dplyr::select(-geometry)
 
 # Select all birds that nest in FL (for which I have distance from urban)
-keepers <- nesting_data2 %>% 
-  group_by(att_id) %>% 
-  summarize(avg_dist_urb = mean(dist_to_urban, na.rm = TRUE)) %>% 
-  filter(!is.nan(avg_dist_urb)) %>% 
+keepers <- nesting_data2 %>%
+  group_by(att_id) %>%
+  summarize(avg_dist_urb = mean(dist_to_urban, na.rm = TRUE)) %>%
+  filter(!is.nan(avg_dist_urb)) %>%
   # filter only those that are in the RSF data
-  filter(att_id %in% unique(urban_rsf_scaled$att_id)) %>% 
-  pull(att_id) 
+  filter(att_id %in% unique(urban_rsf_scaled$att_id)) %>%
+  pull(att_id)
 
 # Model data
-model_data <- nesting_data2 %>% 
-  as.data.frame() %>% 
+model_data <- nesting_data2 %>%
+  as.data.frame() %>%
   filter(att_id %in% keepers)
 
 # Create 'visits' and 'fixes'
 ws_attempts <- format_attempts(ws_nests, 110)
 
-rownames(ws_attempts$fixes) <- gsub(pattern = "_", 
-                                    replacement = "-", 
-                                    x = rownames(ws_attempts$fixes), 
+rownames(ws_attempts$fixes) <- gsub(pattern = "_",
+                                    replacement = "-",
+                                    x = rownames(ws_attempts$fixes),
                                     fixed = TRUE)
-rownames(ws_attempts$visits) <- gsub(pattern = "_", 
-                                     replacement = "-", 
-                                     x = rownames(ws_attempts$visits), 
+rownames(ws_attempts$visits) <- gsub(pattern = "_",
+                                     replacement = "-",
+                                     x = rownames(ws_attempts$visits),
                                      fixed = TRUE)
 
-fixes <- ws_attempts$fixes[keepers,] 
-visits <- ws_attempts$visits[keepers,] 
+fixes <- ws_attempts$fixes[keepers,]
+visits <- ws_attempts$visits[keepers,]
 
 # Distance to urban
-urb_matrix <- model_data %>% 
-  filter(loc_id == 0) %>% 
-  group_by(att_id) %>% 
-  summarize(avg_dist_urb = mean(dist_to_urban, na.rm = TRUE)) %>% 
-  filter(!is.nan(avg_dist_urb)) %>% 
+urb_matrix <- model_data %>%
+  filter(loc_id == 0) %>%
+  group_by(att_id) %>%
+  summarize(avg_dist_urb = mean(dist_to_urban, na.rm = TRUE)) %>%
+  filter(!is.nan(avg_dist_urb)) %>%
   as.data.frame()
 
 # MCMC Parameters
@@ -364,7 +407,7 @@ mcmc_params <- list(burn_in = 1000,
                     n_chain = 3,
                     thin = 5,
                     n_adapt = 1000,
-                    n_iter = 5 * 2000) 
+                    n_iter = 5 * 2000)
 
 # Path to the JAGS file
 jags_file <- "jags_urban"
@@ -394,11 +437,7 @@ post <- jags.samples(model = jags,
                      n.iter = mcmc_params$n_iter,
                      thin = mcmc_params$thin)
 
-saveRDS(post, "output/urban_surv_2023-09-01.rds")
-
-# Get parameter values from posterior----
-
-post <- readRDS("output/urban_surv_2023-08-31.rds")
+# Get parameter values from posterior ####
 
 # Initialize parameter values
 param <- list()
@@ -410,7 +449,7 @@ param$mean <- lapply(post, mean)
 param$lwr <- lapply(post, quantile, 0.025)
 param$upr <- lapply(post, quantile, 0.975)
 
-# Diagnostics----
+# Diagnostics ####
 
 # This informs us of how much thinning should we use (done for each beta parameter)
 autocorr.plot(as.mcmc.list(post$phi.b0), lag.max = 20)
@@ -424,46 +463,27 @@ abline(v = 0, col = "red")
 densplot(as.mcmc.list(post$phi.b1))
 abline(v = 0, col = "red")
 
-# Prep data for plotting----
+# Prepare model output for plotting ####
 
-# Based directly on phi
-phi.df.param <- data.frame(phi.b0 = as.vector(post$phi.b0),
-                           phi.b1 = as.vector(post$phi.b1)) %>% 
-  list() %>% 
-  rep(100) %>% 
-  bind_rows()
-
-phi.df.cov <- data.frame(dist_urb = seq(0, 65, length.out = 100)) %>% 
-  list() %>% 
-  rep(6000) %>% 
-  bind_rows() %>% 
-  arrange(dist_urb)
-
-phi.df.all <- bind_cols(phi.df.param, phi.df.cov) %>% 
-  mutate(phi = plogis((phi.b0 + (phi.b1 * dist_urb)))) %>% 
-  mutate(phi_lwr = quantile(phi, 0.025),
-         phi_upr = quantile(phi, 0.975))
-
-# Based on the parameters
-phi.df <- data.frame(dist_urb = seq(0, 45000, length.out = 500)) %>% 
+phi.df <- data.frame(dist_urb = seq(0, 45000, length.out = 500)) %>%
   mutate(phi.lwr = plogis((param$lwr$phi.b0 + (param$lwr$phi.b1 * dist_urb))),
          phi.mean = plogis((param$mean$phi.b0 + (param$mean$phi.b1 * dist_urb))),
          phi.upr = plogis((param$upr$phi.b0 + (param$upr$phi.b1 * dist_urb))),
          dist_urb_km = dist_urb/1000
   )
 
-# Based on acutally calculated p
 p.df <- data.frame(t = 1:110,
                    p.lwr = apply(post$p, 1, quantile, 0.025),
                    p.mean = apply(post$p, 1, mean),
                    p.upr = apply(post$p, 1, quantile, 0.975))
 
-#Plots----
+# Plot survival results ####
+
 plot(p.mean ~ t, data = p.df, type = "l", lwd = 1, ylim = c(0.15, 0.75))
 lines(p.lwr~t, data = p.df, lty = 2)
 lines(p.upr~t, data = p.df, lty = 2)
 
-raw <- model_data %>% 
+raw <- model_data %>%
   mutate(dist_to_urban_km = dist_to_urban/1000)
 
 ggplot(phi.df, aes(x = dist_urb_km, y = phi.mean)) +
@@ -475,21 +495,18 @@ ggplot(phi.df, aes(x = dist_urb_km, y = phi.mean)) +
   theme_bw() +
   theme(legend.position = "none")
 
-ggsave("output/2023-09-01_Surv.tiff", 
-       width = 180, height = 90, units = "mm", compression = "lzw", dpi = 600)
-
 # Plot survival of mig vs res
 z <- post$z
 rownames(z) <- rownames(visits)
-mig <- nesting_data2 %>% 
-  dplyr::select(att_id, choice) %>% 
-  distinct() %>% 
-  filter(choice == "migrant") %>% 
+mig <- nesting_data2 %>%
+  dplyr::select(att_id, choice) %>%
+  distinct() %>%
+  filter(choice == "migrant") %>%
   pull(att_id)
-res <- nesting_data2 %>% 
-  dplyr::select(att_id, choice) %>% 
-  distinct() %>% 
-  filter(choice == "resident") %>% 
+res <- nesting_data2 %>%
+  dplyr::select(att_id, choice) %>%
+  distinct() %>%
+  filter(choice == "resident") %>%
   pull(att_id)
 z_mig <- z[rownames(z) %in% mig, , , ]
 z_res <- z[rownames(z) %in% res, , , ]
@@ -497,7 +514,7 @@ z_mig_mean <- apply(z_mig, 2, mean)
 z_res_mean <- apply(z_res, 2, mean)
 
 z_migres <- data.frame(choice = rep(c("Migrant", "Residents"), each = 110),
-                       day = c(1:110, 1:110),  
+                       day = c(1:110, 1:110),
                        z = c(z_mig_mean, z_res_mean))
 
 ggplot(z_migres, aes(x = day, y = z, color = choice)) +
@@ -507,17 +524,14 @@ ggplot(z_migres, aes(x = day, y = z, color = choice)) +
   coord_cartesian(ylim = c(0, 1)) +
   theme_bw()
 
-ggsave("output/2023-09-01_Surv-curves.tiff", 
-       width = 80, height = 60, units = "mm", compression = "lzw", dpi = 600)
-
-# Plots ----
+# Plot maps ####
 
 # Color palette
 viridis(begin = 0.25, end = 0.75, n = 2)
 
 # Plot 1: map of urban
-urban_r <- readRDS("input/urban_rasterized.rds") %>% 
-  rast() %>% 
+urban_r <- readRDS("input/urban_rasterized.rds") %>%
+  rast() %>%
   project("epsg:32617")
 
 ext(urban_r) <- ext(coastline)
@@ -539,15 +553,15 @@ p1 <- ggplot() +
 # Plot 2: map of nests (by mig)
 
 nest_locs <- urban_rsf_data %>%
-  as.data.frame() %>% 
-  dplyr::select(nest_long, nest_lat, choice) %>% 
-  distinct() %>%  
-  st_as_sf(coords = c("nest_long", "nest_lat"), crs = 4326) %>% 
+  as.data.frame() %>%
+  dplyr::select(nest_long, nest_lat, choice) %>%
+  distinct() %>%
+  st_as_sf(coords = c("nest_long", "nest_lat"), crs = 4326) %>%
   st_transform(crs = 32617)
 
 p2 <- ggplot() +
   geom_sf(data = coastline, fill = NA) +
-  geom_sf(data = nest_locs, mapping = aes(col = choice), 
+  geom_sf(data = nest_locs, mapping = aes(col = choice),
           size = 3, alpha = 0.4, shape = 17) +
   coord_sf() +
   scale_color_viridis_d(begin = 0.25, end = 0.75) +
@@ -559,9 +573,9 @@ p2 <- ggplot() +
 # Plot 3: map of foraging sites
 
 forag <- urban_rsf_data %>%
-  as.data.frame() %>% 
-  cbind(st_coordinates(urban_rsf_data)) %>% 
-  filter(used == 1) 
+  as.data.frame() %>%
+  cbind(st_coordinates(urban_rsf_data)) %>%
+  filter(used == 1)
 
 p3 <- ggplot() +
   geom_sf(data = coastline, fill = NA) +
@@ -573,30 +587,27 @@ p3 <- ggplot() +
         plot.title = element_text(hjust = 0.5)) +
   ggtitle("Foraging locations")
 
-ggpubr::ggarrange(p3, p1, p2, nrow = 1, ncol = 3, 
+ggpubr::ggarrange(p3, p1, p2, nrow = 1, ncol = 3,
                   labels = c("(A)", "(B)", "(C)"))
 
-ggsave("output/2023-09-01_Maps.tiff", 
-       width = 180, height = 60, units = "mm", dpi = 600, compression = "lzw")
-
-# Additional exploration ----
+# Supplementary ####
 
 # Fit curve to empirical distribution of distances between nest and foraging sites
 fitexp <- urban_rsf_df %>%
-  filter(used == 1) %>% 
-  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>% 
-  pull(dist_to_nest) %>% 
+  filter(used == 1) %>%
+  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>%
+  pull(dist_to_nest) %>%
   MASS::fitdistr("exponential")
 
 fitgam <- urban_rsf_df %>%
-  filter(used == 1) %>% 
-  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>% 
-  pull(dist_to_nest) %>% 
+  filter(used == 1) %>%
+  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>%
+  pull(dist_to_nest) %>%
   MASS::fitdistr("gamma")
 
 dists <- urban_rsf_df %>%
-  filter(used == 1) %>% 
-  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>% 
+  filter(used == 1) %>%
+  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>%
   pull(dist_to_nest)
 
 ks.test(dists, "pexp", fitexp$estimate)
@@ -606,8 +617,8 @@ EnvStats::qqPlot(dists, distribution = "exp", param.list = list(rate = 0.0478787
 EnvStats::qqPlot(dists, distribution = "gamma", param.list = list(shape = 0.5452323980, scale = 1/0.0261050488))
 
 empir <- urban_rsf_df %>%
-  filter(used == 1) %>% 
-  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>% 
+  filter(used == 1) %>%
+  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>%
   ggplot(aes(x = dist_to_nest)) +
   geom_density() +
   #  stat_function(fun = dgamma, n = 100, args = list(shape = 0.55, rate = 0.03), col = "red") +
@@ -618,8 +629,8 @@ empir <- urban_rsf_df %>%
   ggtitle("Observed")
 
 simul <- urban_rsf_df %>%
-  filter(used == 0) %>% 
-  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>% 
+  filter(used == 0) %>%
+  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))/1000) %>%
   ggplot(aes(x = dist_to_nest)) +
   geom_density() +
   stat_function(fun = dexp, n = 100, args = list(rate = 0.05), col = "tomato", lwd = 1.5, alpha = 0.7) +
@@ -628,22 +639,20 @@ simul <- urban_rsf_df %>%
   scale_x_continuous("Foraging trip distance (km)") +
   ggtitle("Simulated")
 
-ggpubr::ggarrange(empir, simul, nrow = 1, ncol = 2, 
+ggpubr::ggarrange(empir, simul, nrow = 1, ncol = 2,
                   labels = c("(A)", "(B)"))
-
-#ggsave("output/trip_distance_empir_vs_simul.tiff", width = 8, height = 4, dpi = 500, compression = "lzw")
 
 # Mean distance of foraging locations from nest for migrants and residents
 urban_rsf_df %>%
-  filter(used == 1) %>% 
-  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))) %>% 
-  group_by(choice) %>% 
+  filter(used == 1) %>%
+  mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat))) %>%
+  group_by(choice) %>%
   summarize(mean(dist_to_nest)/1000)
 
 # Mean distance of foraging locations from urban for migrants and residents
 urban_rsf_df %>%
-  filter(used == 1) %>% 
-  group_by(choice) %>% 
+  filter(used == 1) %>%
+  group_by(choice) %>%
   summarize(mean(dist_to_urban/1000))
 
 # Plot of distance of foraging locations to urban for migrants and residents (used vs. available)
@@ -651,13 +660,13 @@ urban_rsf_df %>%
 mig_labs <- c(migrant = "Migrant",
               resident = "Resident")
 
-avail <- urban_rsf_df %>% 
-  filter(used == 0) %>% 
+avail <- urban_rsf_df %>%
+  filter(used == 0) %>%
   mutate(dist_to_urban = dist_to_urban/1000)
 
-urban_rsf_df %>% 
+urban_rsf_df %>%
   filter(used == 1) %>% # used points
-  mutate(dist_to_urban = dist_to_urban/1000) %>% 
+  mutate(dist_to_urban = dist_to_urban/1000) %>%
   ggplot(aes(x = dist_to_urban, fill = choice, group = choice)) +
   geom_density(data = avail, fill = "gray80") +
   geom_density(alpha = 0.5) +
@@ -668,11 +677,9 @@ urban_rsf_df %>%
   scale_x_continuous("Distance to urban development (km)") +
   theme(legend.position = "none")
 
-#ggsave("output/dist_to_urb_used_vs_avail.tiff", width = 8, height = 4, dpi = 500, compression = "lzw")
-
-used_plot <- urban_rsf_df %>% 
+used_plot <- urban_rsf_df %>%
   filter(used == 1) %>% # used points
-  mutate(dist_to_urban = dist_to_urban/1000) %>% 
+  mutate(dist_to_urban = dist_to_urban/1000) %>%
   ggplot(aes(x = dist_to_urban, fill = choice, group = choice)) +
   geom_density() +
   facet_wrap(~choice, labeller = labeller(choice = mig_labs)) +
@@ -683,9 +690,9 @@ used_plot <- urban_rsf_df %>%
   theme(legend.position = "none") +
   ggtitle("Used")
 
-avail_plot <- urban_rsf_df %>% 
+avail_plot <- urban_rsf_df %>%
   filter(used == 0) %>% # available points
-  mutate(dist_to_urban = dist_to_urban/1000) %>% 
+  mutate(dist_to_urban = dist_to_urban/1000) %>%
   ggplot(aes(x = dist_to_urban, fill = choice, group = choice)) +
   geom_density(alpha = 0.5) +
   facet_wrap(~choice, labeller = labeller(choice = mig_labs)) +
@@ -696,13 +703,11 @@ avail_plot <- urban_rsf_df %>%
   theme(legend.position = "none") +
   ggtitle("Available")
 
-ggpubr::ggarrange(used_plot, avail_plot, nrow = 2, ncol = 1, 
+ggpubr::ggarrange(used_plot, avail_plot, nrow = 2, ncol = 1,
                   labels = c("(A)", "(B)"))
 
-#ggsave("output/dist_to_urb_used_vs_avail.tiff", width = 8, height = 4, dpi = 500, compression = "lzw")
-
 # Plot availability by choice
-urban_avail <- urban_rsf_df %>% 
+urban_avail <- urban_rsf_df %>%
   filter(used == 0)
 
 ggplot(urban_avail, aes(x = dist_to_urban/1000, fill = choice, group = choice)) +
@@ -717,26 +722,26 @@ ggplot(urban_avail, aes(x = dist_to_urban/1000, fill = choice, group = choice)) 
 # Compare use and availability in terms of distance to urban at the attempt level,
 # rank based on discrepancy (larger discrepancies first), add line for distance of nest to urban
 
-us <- urban_rsf_df %>% 
-  group_by(att_id) %>% 
-  filter(used == 1) %>% 
+us <- urban_rsf_df %>%
+  group_by(att_id) %>%
+  filter(used == 1) %>%
   summarize(mean_dist_used = mean(dist_to_urban)/1000)
 
-av <- urban_rsf_df %>% 
-  group_by(att_id) %>% 
-  filter(used == 0) %>% 
+av <- urban_rsf_df %>%
+  group_by(att_id) %>%
+  filter(used == 0) %>%
   summarize(mean_dist_avai = mean(dist_to_urban)/1000)
 
-discrep <- left_join(us, av, by = "att_id") %>% 
-  mutate(discrep = abs(mean_dist_avai - mean_dist_used)) %>% 
-  arrange(desc(discrep)) %>% 
+discrep <- left_join(us, av, by = "att_id") %>%
+  mutate(discrep = abs(mean_dist_avai - mean_dist_used)) %>%
+  arrange(desc(discrep)) %>%
   pull(att_id)
 
 urban_rsf_df$att_id_reord <- factor(urban_rsf_df$att_id, levels = discrep)
 
-nests <- urban_rsf_df %>% 
-  dplyr::select(att_id_reord, nest_long, nest_lat) %>% 
-  distinct() 
+nests <- urban_rsf_df %>%
+  dplyr::select(att_id_reord, nest_long, nest_lat) %>%
+  distinct()
 
 coordinates(nests) <- nests[,c("nest_long", "nest_lat")]
 proj4string(nests) <- CRS("+init=epsg:4326")
@@ -745,12 +750,12 @@ nests$nest_to_urban <- raster::extract(dist_urb_r, nests)
 
 nests <- as.data.frame(nests)
 
-ind_plot <- urban_rsf_df %>% 
-  filter(used == 1) %>% 
+ind_plot <- urban_rsf_df %>%
+  filter(used == 1) %>%
   ggplot(aes(x = dist_to_urban/1000, fill = choice, group = choice)) +
   geom_density(data = urban_rsf_df[urban_rsf_df$used==0,], alpha = 0.5, fill = "gray50") +
   geom_density(alpha = 0.5) +
-  geom_vline(aes(xintercept = nest_to_urban/1000), data = nests) + 
+  geom_vline(aes(xintercept = nest_to_urban/1000), data = nests) +
   facet_wrap(~att_id_reord) +
   scale_fill_viridis_d(begin = 0.25, end = 0.75) +
   theme_void() +
@@ -758,16 +763,14 @@ ind_plot <- urban_rsf_df %>%
   scale_x_continuous("Distance to urban development (km)") +
   theme(legend.position = "none")
 
-#ggsave("output/individual_dist_to_urban_use_vs_avail.tiff", plot = ind_plot, width = 15, height = 15, dpi = 400, compression = "lzw")
-
 # Plot distance of nest to urban for migrants and residents
 
-nests %>% 
-  mutate(att_id = att_id_reord) %>% 
-  left_join(urban_rsf_df[,c("att_id", "choice")], by = "att_id") %>% 
-  mutate(nest_to_urban = nest_to_urban/1000) %>% 
-  dplyr::select(att_id, nest_to_urban, choice) %>% 
-  distinct() %>% 
+nests %>%
+  mutate(att_id = att_id_reord) %>%
+  left_join(urban_rsf_df[,c("att_id", "choice")], by = "att_id") %>%
+  mutate(nest_to_urban = nest_to_urban/1000) %>%
+  dplyr::select(att_id, nest_to_urban, choice) %>%
+  distinct() %>%
   ggplot(aes(x = nest_to_urban, fill = choice)) +
   geom_density() +
   facet_wrap(~ choice, labeller = labeller(choice = mig_labs)) +
@@ -775,6 +778,4 @@ nests %>%
   scale_y_continuous(name = "Density") +
   scale_fill_viridis_d("Choice", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
   theme_minimal() +
-  theme(legend.position = "none") 
-
-#ggsave("output/dist_nest_to_urban.tiff", width = 8, height = 4, dpi = 500, compression = "lzw")
+  theme(legend.position = "none")
