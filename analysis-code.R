@@ -96,27 +96,45 @@ nest_att$date <- as_date(nest_att$date)
 # Fix burst column to match between data frames
 mig_yrs$burst <- paste0(mig_yrs$stork, "-", mig_yrs$year)
 
-# Fix att_id column to match between data frames
+# Fix att_id column
 ws_nests$nests$att_id <- paste0(ws_nests$nests$burst, "-",
                                 ws_nests$nests$loc_id)
-ws_nests$visits$att_id <- paste0(ws_nests$visits$burst, "-",
-                                 ws_nests$visits$loc_id)
+
+ws_nests$visits$att_id <- NA
+
+for (i in 1:nrow(ws_nests$nests)) {
+  nest <- ws_nests$nests[i, ]
+  ws_nests$visits[ws_nests$visits$burst == nest$burst &
+                    as_date(ws_nests$visits$date) >= nest$attempt_start &
+                    as_date(ws_nests$visits$date) <= nest$attempt_end, ]$att_id <- nest$att_id
+}
+
+# Keep only data within nesting attempts
+attempts <- ws_nests$visits %>%
+  filter(!is.na(att_id))
 
 # Join raw attempts data with migration data
-nesting_data <- left_join(attempts_raw, mig_yrs, by = "burst") %>%
+nesting_data <- left_join(attempts, mig_yrs, by = "burst") %>%
   dplyr::select(att_id, burst, stork, choice, strategy, flexible,
-                day_of_att, date, datetime, long, lat, loc_id)
+                date, long, lat, loc_id)
 
 # Keep only birds for which I know the migratory choice and mutate date column
 nesting_data <- nesting_data %>%
   filter(!is.na(choice)) %>%
   mutate(date_ymd = date)
 
-# Join location of the nest
+# Join location of the nest and start date
 nest_coords <- ws_nests$nests %>% dplyr::select(att_id,
+                                                attempt_start,
                                                 nest_long = long,
                                                 nest_lat = lat)
 nesting_data <- nesting_data %>% left_join(nest_coords, by = "att_id")
+
+# Add day of attempt column
+nesting_data <- nesting_data %>%
+  mutate(day_of_att = as.numeric(
+    ceiling(
+      difftime(date, attempt_start, unit = "days"))))
 
 # All nests corresponding to the attempts in nesting_data
 nest_loc_data <- nesting_data %>%
@@ -167,7 +185,7 @@ system.time({
     # Get the data for this attempt
     dat <- nesting_data %>% filter(att_id == i) %>%
       mutate(used = 1) %>%
-      dplyr::select(att_id, burst, stork, choice, date_ymd, datetime,
+      dplyr::select(att_id, burst, stork, choice, date_ymd, date,
                     day_of_att, long, lat, loc_id,
                     nest_long, nest_lat, used) %>%
       mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat)))
@@ -216,7 +234,7 @@ system.time({
                stork = unique(dat$stork),
                choice = unique(dat$choice),
                date_ymd = NA,
-               datetime = NA,
+               date = NA,
                day_of_att = NA,
                long = X,
                lat = Y,
@@ -224,7 +242,7 @@ system.time({
                nest_long = unique(dat$nest_long),
                nest_lat = unique(dat$nest_lat),
                used = 0) %>%
-        dplyr::select(att_id, burst, stork, choice, date_ymd, datetime,
+        dplyr::select(att_id, burst, stork, choice, date_ymd, date,
                       day_of_att, long, lat, loc_id, nest_long, nest_lat, used) %>%
         mutate(dist_to_nest = geosphere::distGeo(p1 = cbind(long, lat), p2 = cbind(nest_long, nest_lat)))
 
@@ -348,6 +366,9 @@ ggplot(pred_df, aes(x = dist_to_urban_km, y = rss, col = choice)) +
   scale_color_viridis_d("Tactic", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
   scale_fill_viridis_d("Tactic", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
   theme_bw()
+
+ggsave("output/Fig2.tiff",
+       width = 180, height = 90, units = "mm", compression = "lzw", dpi = 600)
 
 # Nest survival ####
 
@@ -495,6 +516,9 @@ ggplot(phi.df, aes(x = dist_urb_km, y = phi.mean)) +
   theme_bw() +
   theme(legend.position = "none")
 
+ggsave("output/Fig3.tiff",
+       width = 180, height = 90, units = "mm", compression = "lzw", dpi = 600)
+
 # Plot survival of mig vs res
 z <- post$z
 rownames(z) <- rownames(visits)
@@ -523,6 +547,9 @@ ggplot(z_migres, aes(x = day, y = z, color = choice)) +
   labs(x = "Days", y = "Cumulative nest survival") +
   coord_cartesian(ylim = c(0, 1)) +
   theme_bw()
+
+ggsave("output/Fig4.tiff",
+       width = 80, height = 60, units = "mm", compression = "lzw", dpi = 600)
 
 # Plot maps ####
 
@@ -589,6 +616,9 @@ p3 <- ggplot() +
 
 ggpubr::ggarrange(p3, p1, p2, nrow = 1, ncol = 3,
                   labels = c("(A)", "(B)", "(C)"))
+
+ggsave("output/Fig1.tiff",
+       width = 180, height = 60, units = "mm", dpi = 600, compression = "lzw")
 
 # Supplementary ####
 
