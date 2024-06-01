@@ -28,6 +28,9 @@ dist_to_urb_2016 <- rast("processed_layers/dist-to-development_1km_2016_Landfire
 dist_to_urb_2010 <- rast("processed_layers/dist-to-development_1km_2010_TIGER_UTM17N.tiff")
 dev_2001_agg <- rast("processed_layers/development_aggregated_300m_2001_Landfire_UTM17N.tiff")
 dev_2016_agg <- rast("processed_layers/development_aggregated_300m_2016_Landfire_UTM17N.tiff")
+dist_to_urb_agg_2001 <- rast("processed_layers/dist-to-development_aggregated_300m_2001_Landfire_UTM17N.tiff")
+dist_to_urb_agg_2016 <- rast("processed_layers/dist-to-development_aggregated_300m_2016_Landfire_UTM17N.tiff")
+tiger <- st_read("processed_layers/urban_polygons_TIGER_UTM17N.shp")
 wmd <- st_read("processed_layers/fl-water-mgmt-districts_UTM17N.shp")
 soflo <- st_read("processed_layers/south-florida-buffer_UTM17N.shp")
 se <- st_read("processed_layers/southeast-boundary_UTM17N.shp")
@@ -244,6 +247,13 @@ urban_rsf_data$urb_agg_2016 <- terra::extract(dev_2016_agg,
 urban_rsf_data$urb_agg_2001 <- terra::extract(dev_2001_agg,
                                               st_coordinates(urban_rsf_data))[, 1]
 
+urban_rsf_data$urb_tiger_2010 <- as.numeric(st_intersects(urban_rsf_data, tiger))
+
+urban_rsf_data$dist_to_urb_agg_2001 <- terra::extract(dist_to_urb_agg_2001,
+                                                      st_coordinates(urban_rsf_data))[, 1]
+urban_rsf_data$dist_to_urb_agg_2016 <- terra::extract(dist_to_urb_agg_2016,
+                                                      st_coordinates(urban_rsf_data))[, 1]
+
 # Transform to data frame
 urban_rsf_df <- as.data.frame(urban_rsf_data) %>%
   cbind(st_coordinates(urban_rsf_data)) %>%
@@ -253,7 +263,8 @@ urban_rsf_df <- urban_rsf_df %>%
   mutate(weight = case_when(
     used == 1 ~ 1,
     used == 0 ~ 10000
-  ))
+  ),
+  urb_tiger_2010 = ifelse(is.na(urb_tiger_2010), 0, urb_tiger_2010))
 
 # Scale and center variables
 mean_2016 <- mean(urban_rsf_df$dist_to_urb_2016, na.rm = TRUE)
@@ -262,17 +273,27 @@ mean_2001 <- mean(urban_rsf_df$dist_to_urb_2001, na.rm = TRUE)
 sd_2001 <- sd(urban_rsf_df$dist_to_urb_2001, na.rm = TRUE)
 mean_2010 <- mean(urban_rsf_df$dist_to_urb_2010, na.rm = TRUE)
 sd_2010 <- sd(urban_rsf_df$dist_to_urb_2010, na.rm = TRUE)
+mean_2016_agg <- mean(urban_rsf_df$dist_to_urb_agg_2016, na.rm = TRUE)
+sd_2016_agg <- sd(urban_rsf_df$dist_to_urb_agg_2016, na.rm = TRUE)
+mean_2001_agg <- mean(urban_rsf_df$dist_to_urb_agg_2001, na.rm = TRUE)
+sd_2001_agg <- sd(urban_rsf_df$dist_to_urb_agg_2001, na.rm = TRUE)
 
 urban_rsf_df <- urban_rsf_df %>%
   mutate(dist_to_urb_2016_sc = (dist_to_urb_2016 - mean_2016)/sd_2016,
          dist_to_urb_2001_sc = (dist_to_urb_2001 - mean_2001)/sd_2001,
          dist_to_urb_2010_sc = (dist_to_urb_2010 - mean_2010)/sd_2010,
+         dist_to_urb_agg_2016_sc = (dist_to_urb_agg_2016 - mean_2016_agg)/sd_2016_agg,
+         dist_to_urb_agg_2001_sc = (dist_to_urb_agg_2001 - mean_2001_agg)/sd_2001_agg,
          mean_dist_to_urb_2001 = mean_2001,
          mean_dist_to_urb_2016 = mean_2016,
          mean_dist_to_urb_2010 = mean_2010,
+         mean_dist_to_urb_agg_2001 = mean_2001_agg,
+         mean_dist_to_urb_agg_2016 = mean_2016_agg,
          sd_dist_to_urb_2001 = sd_2001,
          sd_dist_to_urb_2016 = sd_2016,
-         sd_dist_to_urb_2010 = sd_2010)
+         sd_dist_to_urb_2010 = sd_2010,
+         sd_dist_to_urb_agg_2001 = sd_2001_agg,
+         sd_dist_to_urb_agg_2016 = sd_2016_agg)
 
 # Save processed data ####
 

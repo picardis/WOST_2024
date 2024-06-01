@@ -128,12 +128,17 @@ urb_poly_rast <- rasterize(urb_poly, template_se_1km, background = 0)
 
 urb_poly_rast_2010 <- mask(urb_poly_rast, se_reproj)
 
+urb_poly <- aggregate(urb_poly)
+
 # Calculate distance to urban ####
 
 dist_to_urb_2001 <- distance(dev_2001_se, target = 0, exclude = NA)
 dist_to_urb_2016 <- distance(dev_2016_se, target = 0, exclude = NA)
 
 dist_to_urb_2010_tiger <- distance(urb_poly_rast_2010, target = 0, exclude = NA)
+
+dist_to_urb_agg_2001 <- distance(dev_2001_agg_se, target = 0, exclude = NA)
+dist_to_urb_agg_2016 <- distance(dev_2016_agg_se, target = 0, exclude = NA)
 
 # Water management districts ####
 
@@ -155,9 +160,12 @@ writeRaster(dist_to_urb_2016, "processed_layers/dist-to-development_1km_2016_Lan
 writeRaster(dist_to_urb_2010_tiger, "processed_layers/dist-to-development_1km_2010_TIGER_UTM17N.tiff", overwrite = TRUE)
 writeRaster(dev_2001_agg_se, "processed_layers/development_aggregated_300m_2001_Landfire_UTM17N.tiff", overwrite = TRUE)
 writeRaster(dev_2016_agg_se, "processed_layers/development_aggregated_300m_2016_Landfire_UTM17N.tiff", overwrite = TRUE)
+writeRaster(dist_to_urb_agg_2001, "processed_layers/dist-to-development_aggregated_300m_2001_Landfire_UTM17N.tiff", overwrite = TRUE)
+writeRaster(dist_to_urb_agg_2016, "processed_layers/dist-to-development_aggregated_300m_2016_Landfire_UTM17N.tiff", overwrite = TRUE)
 st_write(wmd, "processed_layers/fl-water-mgmt-districts_UTM17N.shp", append = FALSE)
 st_write(soflo, "processed_layers/south-florida-buffer_UTM17N.shp", append = FALSE)
 st_write(se, "processed_layers/southeast-boundary_UTM17N.shp", append = FALSE)
+writeVector(urb_poly, "processed_layers/urban_polygons_TIGER_UTM17N.shp", overwrite = TRUE)
 
 # Change in development from 2001 to 2016 ####
 

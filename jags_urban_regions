@@ -1,0 +1,49 @@
+model {
+
+# Priors and constraints
+#Survival
+phi.b0 ~ dnorm(0, 1e-2)
+phi.b1 ~ dnorm(0, 1e-2)
+phi.b2 ~ dnorm(0, 1e-2)
+phi.b3 ~ dnorm(0, 1e-2)
+phi.b4 ~ dnorm(0, 1e-2)
+phi.b5 ~ dnorm(0, 1e-2)
+#Detection
+p.b0 ~ dnorm(0, 1e-2)
+p.b1 ~ dnorm(0, 1e-2)
+
+# Likelihood
+for (i in 1:nests){
+
+  #Survival
+  for (t in 1:(days-1)){
+      logit(phi[i, t]) <- phi.b0 +
+      (phi.b1 * dist_urb[i]) +
+      (phi.b2 * se[i]) +
+      (phi.b3 * jax[i]) +
+      (phi.b4 * dist_urb[i] * se[i]) +
+      (phi.b5 * dist_urb[i] * jax[i])
+
+  }
+}
+
+#Detection
+  for (t in 1:days){
+    logit(p[t]) <- p.b0 + p.b1 * t
+    }
+
+for (i in 1:nests){
+   # Define latent state at first capture
+   z[i, 1] <- 1
+
+   for (t in 2:days){
+      # State process
+      mu1[i, t] <- phi[i, t-1] * z[i, t-1]
+      z[i, t] ~ dbern(mu1[i, t])
+
+      # Observation process
+      mu2[i, t] <- p[t] * z[i, t]
+      y[i, t] ~ dbin(mu2[i, t], gps_fixes[i, t])
+      } #t
+   } #i
+}
