@@ -80,6 +80,7 @@ wilcox.test(res_years_stork2$dist_to_urb_2016,
 wilcox.test(res_years_stork2$dist_to_urb_2001,
             mig_years_stork2$dist_to_urb_2001,
             alternative = "less") # Fail to reject null
+# Both of these are Jacksonville storks
 
 # Nest locations ####
 

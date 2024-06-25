@@ -7,11 +7,11 @@ library(nestR)
 
 # Load model ####
 
-post <- readRDS("output/nest_survival_by_region.rds")
+post <- readRDS("input/nest_survival_by_region_2024-06-05.rds")
 
 # Load predictors ####
 
-urb_matrix <- readRDS("output/surv_model_predictors.rds") %>%
+urb_matrix <- readRDS("input/surv_model_predictors.rds") %>%
   mutate(dist_urb_km = avg_dist_urb/1000) %>%
   mutate(region = case_when(jax == 1 ~ "Jacksonville",
                             soflo == 1 ~ "South Florida",
@@ -60,6 +60,15 @@ traceplot(as.mcmc.list(post$phi.b2))
 traceplot(as.mcmc.list(post$phi.b3))
 traceplot(as.mcmc.list(post$phi.b4))
 traceplot(as.mcmc.list(post$phi.b5))
+traceplot(as.mcmc.list(post$p.b0))
+traceplot(as.mcmc.list(post$p.b1))
+
+gelman.diag(post$phi.b0)
+gelman.diag(post$phi.b1)
+gelman.diag(post$phi.b2)
+gelman.diag(post$phi.b3)
+gelman.diag(post$phi.b4)
+gelman.diag(post$phi.b5)
 
 densplot(as.mcmc.list(post$phi.b0))
 abline(v = 0, col = "red")
@@ -72,6 +81,10 @@ abline(v = 0, col = "red")
 densplot(as.mcmc.list(post$phi.b4))
 abline(v = 0, col = "red")
 densplot(as.mcmc.list(post$phi.b5))
+abline(v = 0, col = "red")
+densplot(as.mcmc.list(post$p.b0))
+abline(v = 0, col = "red")
+densplot(as.mcmc.list(post$p.b1))
 abline(v = 0, col = "red")
 
 # Survival probability phi ####
@@ -139,6 +152,9 @@ ggplot(est, aes(x = dist_urb_km, y = phi_mean)) +
   theme_bw() +
   theme(legend.position = "none")
 
+ggsave("output/surv_phi.tiff",
+       width = 180, height = 90, units = "mm", compression = "lzw", dpi = 600)
+
 # Detection probability p ####
 
 p_df <- data.frame(t = 1:110,
@@ -147,120 +163,197 @@ p_df <- data.frame(t = 1:110,
                    p_upr = apply(post$p, 1, quantile, 0.975))
 
 ggplot(p_df, aes(x = t, y = p_mean)) +
-  geom_ribbon(aes(ymin = p_lwr, ymax = p_upr), fill = "gray80") +
-  geom_line() +
+  geom_ribbon(aes(ymin = p_lwr, ymax = p_upr), fill = "tomato", alpha = 0.3) +
+  geom_line(linewidth = 0.1, color = "tomato") +
   labs(x = "Day of nesting attempt", y = "Detection probability") +
-  theme_bw()
+  theme_bw() +
+  coord_cartesian(ylim = c(0, 1))
+
+ggsave("output/surv_p.tiff",
+       width = 80, height = 60, units = "mm", compression = "lzw", dpi = 600)
 
 # Cumulative survival z ####
 
-z <- post$z
-rownames(z) <- rownames(visits)
+# Testing the object's dimensions and how to subset it
+dim(post$z)
+dim(post$z[1, , , ]) #individual
+dim(post$z[, 1, , ]) # day
+dim(post$z[, , 1, ]) # iteration
+dim(post$z[, , , 1]) # chain
 
-mig_soflo <- rsf_data %>%
-  dplyr::select(att_id, choice, region) %>%
-  distinct() %>%
-  filter(choice == "migrant" & region == "South Florida") %>%
-  pull(att_id)
+mean(post$z[, 110, , ])
+mean(as.vector(post$z[1:145, 110, , ]))
 
-res_soflo <- rsf_data %>%
-  dplyr::select(att_id, choice, region) %>%
-  distinct() %>%
-  filter(choice == "resident" & region == "South Florida") %>%
-  pull(att_id)
+# Getting positional indices of each group
+mig_soflo <- which(rownames(visits) %in% rsf_data[rsf_data$choice == "migrant" &
+                                                    rsf_data$region == "South Florida", ]$att_id)
+res_soflo <- which(rownames(visits) %in% rsf_data[rsf_data$choice == "resident" &
+                                                    rsf_data$region == "South Florida", ]$att_id)
+mig_se <- which(rownames(visits) %in% rsf_data[rsf_data$choice == "migrant" &
+                                                 rsf_data$region == "Southeast", ]$att_id)
+res_jax <- which(rownames(visits) %in% rsf_data[rsf_data$choice == "resident" &
+                                                  rsf_data$region == "Jacksonville", ]$att_id)
 
-res_jax <- rsf_data %>%
-  dplyr::select(att_id, choice, region) %>%
-  distinct() %>%
-  filter(region == "Jacksonville") %>%
-  pull(att_id)
+# z
 
-mig_se <- rsf_data %>%
-  dplyr::select(att_id, choice, region) %>%
-  distinct() %>%
-  filter(region == "Southeast") %>%
-  pull(att_id)
+mean(as.vector(post$z[mig_soflo, , , ]))
+mean(as.vector(post$z[res_soflo, , , ]))
+mean(as.vector(post$z[mig_se, , , ]))
+mean(as.vector(post$z[res_jax, , , ]))
 
-z_mig_soflo <- z[rownames(z) %in% mig_soflo, , , ]
-z_res_soflo <- z[rownames(z) %in% res_soflo, , , ]
-z_mig_se <- z[rownames(z) %in% mig_se, , , ]
-z_res_jax <- z[rownames(z) %in% res_jax, , , ]
-z_mig_soflo_mean <- apply(z_mig_soflo, 2, mean)
-z_res_soflo_mean <- apply(z_res_soflo, 2, mean)
-z_mig_se_mean <- apply(z_mig_se, 2, mean)
-z_res_jax_mean <- apply(z_res_jax, 2, mean)
+quantile(as.vector(post$z[mig_soflo, , , ]), 0.025)
+quantile(as.vector(post$z[res_soflo, , , ]), 0.025)
+quantile(as.vector(post$z[mig_se, , , ]), 0.025)
+quantile(as.vector(post$z[res_jax, , , ]), 0.025)
 
-z_preds <- expand.grid(choice = c("Migrant", "Resident"),
-                       region = c("Jacksonville", "South Florida", "Southeast"),
-                       day = 1:110) %>%
-  filter(!(choice == "Migrant" & region == "Jacksonville") &
-           !(choice == "Resident" & region == "Southeast")) %>%
-  arrange(region, choice, day) %>%
-  mutate(z_mean = c(z_res_jax_mean,
-                    z_mig_soflo_mean,
-                    z_res_soflo_mean,
-                    z_mig_se_mean))
+quantile(as.vector(post$z[mig_soflo, , , ]), 0.975)
+quantile(as.vector(post$z[res_soflo, , , ]), 0.975)
+quantile(as.vector(post$z[mig_se, , , ]), 0.975)
+quantile(as.vector(post$z[res_jax, , , ]), 0.975)
+
+quantile(as.vector(post$z[mig_soflo, , , ]))
+quantile(as.vector(post$z[res_soflo, , , ]))
+quantile(as.vector(post$z[mig_se, , , ]))
+quantile(as.vector(post$z[res_jax, , , ]))
+
+combos <- rsf_data %>%
+  select(region, choice) %>%
+  distinct()
+
+z_preds <- data.frame()
+
+for (i in 1:110) {
+  combos$day <- i
+  combos <- combos %>%
+    mutate(z_mean = case_when(
+      region == "South Florida" &
+        choice == "migrant" ~ mean(as.vector(post$z[mig_soflo, i, , ])),
+      region == "South Florida" &
+        choice == "resident" ~ mean(as.vector(post$z[res_soflo, i, , ])),
+      region == "Southeast" &
+        choice == "migrant" ~ mean(as.vector(post$z[mig_se, i, , ])),
+      region == "Jacksonville" &
+        choice == "resident" ~ mean(as.vector(post$z[res_jax, i, , ]))
+    ),
+    z_lwr = case_when(
+      region == "South Florida" &
+        choice == "migrant" ~ quantile(as.vector(post$z[mig_soflo, i, , ]), 0.025),
+      region == "South Florida" &
+        choice == "resident" ~ quantile(as.vector(post$z[res_soflo, i, , ]), 0.025),
+      region == "Southeast" &
+        choice == "migrant" ~ quantile(as.vector(post$z[mig_se, i, , ]), 0.025),
+      region == "Jacksonville" &
+        choice == "resident" ~ quantile(as.vector(post$z[res_jax, i, , ]), 0.025)
+    ),
+    z_upr = case_when(
+      region == "South Florida" &
+        choice == "migrant" ~ quantile(as.vector(post$z[mig_soflo, i, , ]), 0.975),
+      region == "South Florida" &
+        choice == "resident" ~ quantile(as.vector(post$z[res_soflo, i, , ]), 0.975),
+      region == "Southeast" &
+        choice == "migrant" ~ quantile(as.vector(post$z[mig_se, i, , ]), 0.975),
+      region == "Jacksonville" &
+        choice == "resident" ~ quantile(as.vector(post$z[res_jax, i, , ]), 0.975)
+    ))
+  z_preds <- rbind(z_preds, combos)
+}
 
 ggplot(z_preds, aes(x = day, y = z_mean, color = choice)) +
   geom_line(linewidth = 1.2) +
   facet_wrap(~ region) +
-  scale_color_viridis_d("Choice", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
+  scale_color_viridis_d("Tactic", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
   labs(x = "Days", y = "Cumulative nest survival") +
   coord_cartesian(ylim = c(0, 1)) +
   theme_bw()
 
-# Survival to fledging z110 ####
+ggsave("output/surv_z.tiff",
+       width = 180, height = 90, units = "mm", compression = "lzw", dpi = 600)
 
-z110_mig_soflo_mean <- mean(z_mig_soflo[, 110, , ])
-z110_res_soflo_mean <- mean(z_res_soflo[, 110, , ])
-z110_mig_se_mean <- mean(z_mig_se[, 110, , ])
-z110_res_jax_mean <- mean(z_res_jax[, 110, , ])
+# z 110
+mean(as.vector(post$z[mig_soflo, 110, , ]))
+mean(as.vector(post$z[res_soflo, 110, , ]))
+mean(as.vector(post$z[mig_se, 110, , ]))
+mean(as.vector(post$z[res_jax, 110, , ]))
 
-z110_mig_soflo_lwr <- quantile(z_mig_soflo[, 110, , ], 0.025)
-z110_res_soflo_lwr <- quantile(z_res_soflo[, 110, , ], 0.025)
-z110_mig_se_lwr <- quantile(z_mig_se[, 110, , ], 0.025)
-z110_res_jax_lwr <- quantile(z_res_jax[, 110, , ], 0.025)
+quantile(as.vector(post$z[mig_soflo, 110, , ]), 0.025)
+quantile(as.vector(post$z[res_soflo, 110, , ]), 0.025)
+quantile(as.vector(post$z[mig_se, 110, , ]), 0.025)
+quantile(as.vector(post$z[res_jax, 110, , ]), 0.025)
 
-z110_mig_soflo_upr <- quantile(z_mig_soflo[, 110, , ], 0.975)
-z110_res_soflo_upr <- quantile(z_res_soflo[, 110, , ], 0.975)
-z110_mig_se_upr <- quantile(z_mig_se[, 110, , ], 0.975)
-z110_res_jax_upr <- quantile(z_res_jax[, 110, , ], 0.975)
+quantile(as.vector(post$z[mig_soflo, 110, , ]), 0.975)
+quantile(as.vector(post$z[res_soflo, 110, , ]), 0.975)
+quantile(as.vector(post$z[mig_se, 110, , ]), 0.975)
+quantile(as.vector(post$z[res_jax, 110, , ]), 0.975)
 
-z110_mig_soflo <- data.frame(choice = "Migrant",
-                             region = "South Florida") %>%
-  mutate(z110_mean = z110_mig_soflo_mean,
-         z110_lwr = z110_mig_soflo_lwr,
-         z110_upr = z110_mig_soflo_upr)
+quantile(as.vector(post$z[mig_soflo, 110, , ]))
+quantile(as.vector(post$z[res_soflo, 110, , ]))
+quantile(as.vector(post$z[mig_se, 110, , ]))
+quantile(as.vector(post$z[res_jax, 110, , ]))
 
-z110_res_soflo <- data.frame(choice = "Resident",
-                             region = "South Florida") %>%
-  mutate(z110_mean = z110_res_soflo_mean,
-         z110_lwr = z110_res_soflo_lwr,
-         z110_upr = z110_res_soflo_upr)
+z110_df <- z_preds %>%
+  filter(day == 110)
 
-z110_mig_se <- data.frame(choice = "Migrant",
-                             region = "Southeast") %>%
-  mutate(z110_mean = z110_mig_se_mean,
-         z110_lwr = z110_mig_se_lwr,
-         z110_upr = z110_mig_se_upr)
-
-z110_res_jax <- data.frame(choice = "Resident",
-                             region = "Jacksonville") %>%
-  mutate(z110_mean = z110_res_jax_mean,
-         z110_lwr = z110_res_jax_lwr,
-         z110_upr = z110_res_jax_upr)
-
-z110_df <- z110_mig_soflo %>%
-  bind_rows(z110_res_soflo) %>%
-  bind_rows(z110_mig_se) %>%
-  bind_rows(z110_res_jax)
-
-ggplot(z110_df, aes(x = choice, y = z110_mean, color = choice)) +
+ggplot(z110_df, aes(x = choice, y = z_mean, color = choice)) +
   geom_point(size = 2) +
-  geom_errorbar(aes(ymin = z110_lwr, ymax = z110_upr), width = 0.3) +
+  geom_errorbar(aes(ymin = z_lwr, ymax = z_upr), width = 0.3) +
   facet_wrap(~ region) +
   scale_color_viridis_d("Choice", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
   labs(x = " ", y = "Nest survival to day 110") +
   theme_bw() +
   theme(axis.text.x = element_blank(),
         axis.ticks.x = element_blank())
+
+ggsave("output/surv_z110.tiff",
+       width = 180, height = 90, units = "mm", compression = "lzw", dpi = 600)
+
+# Trends in survival ####
+
+surv_trends <- data.frame(att_id = rownames(visits))
+
+mig_yrs <- readRDS("input/mig_yrs.rds")
+urban_rsf_df <- readRDS("input/rsf-data.rds")
+
+att_info <- urban_rsf_df %>%
+  group_by(att_id) %>%
+  arrange(date_ymd) %>%
+  slice(1) %>%
+  mutate(year = year(date_ymd)) %>%
+  filter(!is.na(year)) %>%
+  select(att_id, year, group, choice) %>%
+  distinct() %>%
+  filter(att_id %in% surv_trends$att_id)
+
+surv_trends <- left_join(surv_trends, att_info)
+
+class(post$z[, 110, , ])
+
+mean_z <- c()
+lwr_z <- c()
+upr_z <- c()
+
+for (i in 1:145) {
+  mean_z[i] <- quantile(post$z[i, 110, , ], 0.5)
+  lwr_z[i] <- quantile(post$z[i, 110, , ], 0.025)
+  upr_z[i] <- quantile(post$z[i, 110, , ], 0.975)
+}
+
+surv_trends$mean_z <- mean_z
+surv_trends$lwr_z <- lwr_z
+surv_trends$upr_z <- upr_z
+
+surv_trends %>%
+  group_by(year, group, choice) %>%
+  summarize(mean_z = mean(mean_z),
+            lwr_z = mean(lwr_z),
+            upr_z = mean(upr_z)) %>%
+  ggplot(aes(x = factor(year), y = mean_z, color = choice)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lwr_z, ymax = upr_z)) +
+  facet_grid(choice ~ group) +
+  scale_color_viridis_d("Tactic", labels = c("Migrant", "Resident"),
+                        begin = 0.25, end = 0.75) +
+  theme_bw() +
+  labs(x = "Year", y = "Nest survival to day 110")
+
+ggsave("output/trends_z110.tiff",
+       width = 14, height = 7, compression = "lzw", dpi = 600)

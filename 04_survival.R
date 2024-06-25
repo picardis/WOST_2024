@@ -48,14 +48,14 @@ urb_matrix <- model_data %>%
          jax = as.numeric(jax)) %>%
   as.data.frame()
 
-saveRDS(urb_matrix, "output/surv_model_predictors.rds")
+saveRDS(urb_matrix, "input/surv_model_predictors.rds")
 
 # MCMC Parameters
-mcmc_params <- list(burn_in = 1000,
+mcmc_params <- list(burn_in = 10000, # 10000 (was 1000)
                     n_chain = 3,
-                    thin = 5,
-                    n_adapt = 1000,
-                    n_iter = 5 * 2000)
+                    thin = 10, # 10 or 20 (was 5)
+                    n_adapt = 10000, # 10000 (was 1000)
+                    n_iter = 10 * 2000) # thin * 2000
 
 # Path to the JAGS file
 jags_file <- "jags_urban_regions"
@@ -89,4 +89,4 @@ post <- jags.samples(model = jags,
                      n.iter = mcmc_params$n_iter,
                      thin = mcmc_params$thin)
 
-saveRDS(post, "output/nest_survival_by_region.rds")
+saveRDS(post, "input/nest_survival_by_region_2024-06-05.rds")

@@ -298,3 +298,61 @@ urban_rsf_df <- urban_rsf_df %>%
 # Save processed data ####
 
 saveRDS(urban_rsf_df, "input/rsf-data.rds")
+
+# Plots ####
+
+urban_df <- as.data.frame(dev_2016_agg, xy = TRUE)
+
+p1 <- ggplot() +
+  geom_raster(data = urban_df, aes(x = x, y = y, fill = EVT_NAME)) +
+  geom_sf(data = se, fill = NA) +
+  coord_sf() +
+  scale_fill_gradient(low = "#FFFFFF", high = "#000000", na.value = NA) +
+  theme_void() +
+  theme(legend.position = "none", panel.grid.major = element_line(colour = "transparent"),
+        plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Urban areas")
+
+# Plot 2: map of nests (by mig)
+
+nest_locs <- urban_rsf_data %>%
+  as.data.frame() %>%
+  dplyr::select(nest_long, nest_lat, choice) %>%
+  distinct() %>%
+  st_as_sf(coords = c("nest_long", "nest_lat"), crs = 4326) %>%
+  st_transform(crs = 32617)
+
+p2 <- ggplot() +
+  geom_sf(data = se, fill = NA) +
+  geom_sf(data = nest_locs, mapping = aes(col = choice,
+                                          shape = choice),
+          size = 3, alpha = 0.4) +
+  coord_sf() +
+  scale_color_viridis_d(begin = 0.25, end = 0.75) +
+  theme_void() +
+  theme(legend.position = "none", panel.grid.major = element_line(colour = "transparent"),
+        plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Nest locations")
+
+# Plot 3: map of foraging sites
+
+forag <- urban_rsf_data %>%
+  as.data.frame() %>%
+  cbind(st_coordinates(urban_rsf_data)) %>%
+  filter(used == 1)
+
+p3 <- ggplot() +
+  geom_sf(data = se, fill = NA) +
+  geom_point(data = forag, aes(x = X, y = Y, color = choice), alpha = 0.1) +
+  scale_color_viridis_d("Tactic", labels = c("Migrant", "Resident"), begin = 0.25, end = 0.75) +
+  coord_sf() +
+  theme_void() +
+  theme(legend.position = "none", panel.grid.major = element_line(colour = "transparent"),
+        plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Foraging locations")
+
+ggpubr::ggarrange(p3, p1, p2, nrow = 1, ncol = 3,
+                  labels = c("(A)", "(B)", "(C)"))
+
+ggsave("output/mapABC.tiff",
+       width = 180, height = 60, units = "mm", dpi = 600, compression = "lzw")

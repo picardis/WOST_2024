@@ -16,6 +16,7 @@ ws_nests <- readRDS("input/ws_nests_all.rds")
 # Load GIS layers
 wmd <- st_read("processed_layers/fl-water-mgmt-districts_UTM17N.shp")
 se <- st_read("processed_layers/southeast-boundary_UTM17N.shp")
+soflo <- st_read("processed_layers/south-florida-buffer_UTM17N.shp")
 
 # Prepare data ####
 
@@ -61,14 +62,20 @@ nest_coords$wmd <- nest_wmd
 nesting_data <- nesting_data %>%
   left_join(nest_coords, by = "att_id")
 
+nest_soflo <- st_as_sf(nesting_data, coords = c("nest_long", "nest_lat"), crs = 4326) %>%
+  st_transform(32617) %>%
+  st_intersects(soflo, sparse = FALSE)
+
+nesting_data$soflo <- as.logical(nest_soflo)
+
+jax_nests <- nesting_data %>%
+  filter(choice == "resident" & nest_lat > 30) %>%
+  pull(att_id) %>%
+  unique()
+
 nesting_data <- nesting_data %>%
-  mutate(soflo = case_when(
-    wmd == 3 ~ TRUE,
-    TRUE ~ FALSE),
-    fl = case_when(
-      !is.na(wmd) ~ TRUE,
-      is.na(wmd) ~ FALSE
-    ))
+  mutate(jax = att_id %in% jax_nests,
+         se = !jax & !soflo)
 
 # All nests corresponding to the attempts in nesting_data
 nest_loc_data <- nesting_data %>%
@@ -82,25 +89,26 @@ ggplot() +
   geom_point(data = nest_loc_data,
              aes(x = nest_long, y = nest_lat, color = choice))
 
-out_of_fl <- nesting_data %>%
-  filter(is.na(wmd) & nest_lat > 30 & day_of_att == 1) %>%
+soflo <- nesting_data %>%
+  filter(soflo & day_of_att == 1) %>%
   dplyr::select(burst, att_id, choice, date, nest_long, nest_lat) %>%
   distinct() %>%
   mutate(doy = lubridate::yday(date))
 
-in_fl <- nesting_data %>%
-  filter(!att_id %in% unique(out_of_fl$att_id) & day_of_att == 1) %>%
+se <- nesting_data %>%
+  filter(se & day_of_att == 1) %>%
   dplyr::select(burst, att_id, choice, date, nest_long, nest_lat) %>%
   distinct() %>%
   mutate(doy = lubridate::yday(date))
 
-# How many of the birds that nested out of FL also had an attempt in FL
-# in the same year?
-sum(out_of_fl$burst %in% in_fl$burst)
-sum(out_of_fl$burst %in% in_fl$burst)/nrow(out_of_fl)
+# How many of the birds that nested in the Southeast also had an attempt in
+# South FL in the same year?
+sum(se$burst %in% soflo$burst)
+sum(se$burst %in% soflo$burst)/nrow(se)
 
-comparison <- out_of_fl %>%
-  left_join(in_fl, by = "burst")
+comparison <- se %>%
+  left_join(soflo, by = "burst", relationship = "many-to-many",
+            unmatched = "drop")
 # 24% of the birds that nest out of FL have a previous attempt in FL in the
 # same year. The others could be birds that go down to assess and don't even
 # try or birds that try but fail too early for the attempt to be detected

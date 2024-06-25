@@ -166,33 +166,3 @@ st_write(wmd, "processed_layers/fl-water-mgmt-districts_UTM17N.shp", append = FA
 st_write(soflo, "processed_layers/south-florida-buffer_UTM17N.shp", append = FALSE)
 st_write(se, "processed_layers/southeast-boundary_UTM17N.shp", append = FALSE)
 writeVector(urb_poly, "processed_layers/urban_polygons_TIGER_UTM17N.shp", overwrite = TRUE)
-
-# Change in development from 2001 to 2016 ####
-
-# See what the proportion of developed/undeveloped was in 2001
-urb_yn_2001_se <- table(values(dev_2001_agg_se))
-
-urb_yn_2001_se[2]/sum(urb_yn_2001_se)
-
-# Versus in 2016
-urb_yn_2016_se <- table(values(dev_2016_agg_se))
-
-urb_yn_2016_se[2]/sum(urb_yn_2016_se)
-
-# Do the same for Florida only
-fl <- states[states$NAME == "Florida", ]
-fl <- st_transform(fl, crs(dev_2001_agg_se))
-
-dev_2001_fl <- mask(dev_2001_agg_se, fl)
-
-urb_yn_2001_fl <- table(values(dev_2001_fl))
-
-urb_yn_2001_fl[2]/sum(urb_yn_2001_fl)
-
-# Versus in 2016
-
-dev_2016_fl <- mask(dev_2016_agg_se, fl)
-
-urb_yn_2016_fl <- table(values(dev_2016_fl))
-
-urb_yn_2016_fl[2]/sum(urb_yn_2016_fl)

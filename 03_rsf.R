@@ -465,3 +465,25 @@ if (use_tiger) {
          width = 180, height = 90, units = "mm",
          compression = "lzw", dpi = 600)
 }
+
+# Summaries ####
+
+predd_dist_soflo %>%
+  bind_rows(predd_dist_jax) %>%
+  bind_rows(predd_dist_se) %>%
+  group_by(group, choice) %>%
+  filter(log_rss > 0) %>%
+  summarize(min(dist_to_urb)/1000, max(dist_to_urb)/1000)
+
+max_lRSS <- predd_dist_soflo %>%
+  bind_rows(predd_dist_jax) %>%
+  bind_rows(predd_dist_se) %>%
+  group_by(group, choice) %>%
+  summarize(max_log_rss = max(log_rss))
+
+predd_dist_soflo %>%
+  bind_rows(predd_dist_jax) %>%
+  bind_rows(predd_dist_se) %>%
+  left_join(max_lRSS) %>%
+  filter(log_rss == max_log_rss) %>%
+  mutate(dist_to_urb_km = dist_to_urb/1000)
