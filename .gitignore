@@ -3,6 +3,9 @@
 *.RData
 *.Ruserdata
 input/**
+input/
+processed_layers/
 processed_layers/**
 output/**
+output/
 .Rproj.user
