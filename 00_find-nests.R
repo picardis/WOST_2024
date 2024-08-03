@@ -12,7 +12,7 @@ gps <- readRDS("input/GPS_WOST_adults.rds")
 # using methods described in Picardi, S., Frederick, P. C., Borkhataria, R. R.,
 # & Basille, M. (2020). Partial migration in a subtropical wading bird in the
 # southeastern United States. Ecosphere, 11(2), e03054.
-mig_yrs <- readRDS("input/mig_years.rds")
+mig_yrs <- readRDS("input/mig_yrs.rds")
 
 # Find nesting attempts ####
 
