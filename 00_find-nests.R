@@ -82,3 +82,27 @@ nest_att$date <- as_date(nest_att$date)
 # Save ####
 
 saveRDS(ws_nests, "input/ws_nests_all.rds")
+
+# Subset GPS data within nesting attempts ####
+
+nest_info <- ws_nests$nests %>%
+  mutate(att_id = paste0(burst, "-", loc_id)) %>%
+  select(att_id, burst, attempt_start, attempt_end)
+
+# From start to estimated end of nesting attempt
+att <- ws_nests$visits %>%
+  left_join(nest_info, by = "burst", relationship = "many-to-many") %>%
+  filter(!is.na(attempt_start)) %>%
+  filter(as_date(date) >= attempt_start &
+           as_date(date) < attempt_end)
+
+saveRDS(att, "input/nesting_attempts.rds")
+
+# From start of nesting attempt to start + 110 days
+att_110 <- ws_nests$visits %>%
+  left_join(nest_info, by = "burst", relationship = "many-to-many") %>%
+  filter(!is.na(attempt_start)) %>%
+  filter(as_date(date) >= attempt_start &
+           as_date(date) <= attempt_start + days(110))
+
+saveRDS(att_110, "input/nesting_attempts_110.rds")
