@@ -94,7 +94,11 @@ att <- ws_nests$visits %>%
   left_join(nest_info, by = "burst", relationship = "many-to-many") %>%
   filter(!is.na(attempt_start)) %>%
   filter(as_date(date) >= attempt_start &
-           as_date(date) < attempt_end)
+           as_date(date) < attempt_end) %>%
+  mutate(datetime = date,
+         date = as_date(date)) %>%
+  mutate(day_of_att = as.numeric(date - attempt_start + 1)) %>%
+  select(att_id, burst, date, day_of_att, long, lat, loc_id, datetime)
 
 saveRDS(att, "input/nesting_attempts.rds")
 
@@ -103,6 +107,10 @@ att_110 <- ws_nests$visits %>%
   left_join(nest_info, by = "burst", relationship = "many-to-many") %>%
   filter(!is.na(attempt_start)) %>%
   filter(as_date(date) >= attempt_start &
-           as_date(date) <= attempt_start + days(110))
+           as_date(date) <= attempt_start + days(110)) %>%
+  mutate(datetime = date,
+         date = as_date(date)) %>%
+  mutate(day_of_att = as.numeric(date - attempt_start + 1)) %>%
+  select(att_id, burst, date, day_of_att, long, lat, loc_id, datetime)
 
 saveRDS(att_110, "input/nesting_attempts_110.rds")
