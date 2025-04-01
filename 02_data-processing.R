@@ -356,3 +356,51 @@ ggpubr::ggarrange(p3, p1, p2, nrow = 1, ncol = 3,
 
 ggsave("output/mapABC.tiff",
        width = 180, height = 60, units = "mm", dpi = 600, compression = "lzw")
+
+# SoFlo only plots ####
+
+urban_soflo <- crop(dev_2016_agg, soflo)
+
+urban_soflo <- as.data.frame(urban_soflo, xy = TRUE)
+
+ggplot() +
+  geom_sf(data = se, fill = NA) +
+  geom_raster(data = urban_soflo, aes(x = x, y = y, fill = EVT_NAME)) +
+  coord_sf() +
+  scale_fill_gradient(low = "#FFFFFF", high = "#000000", na.value = NA) +
+  theme_void() +
+  theme(legend.position = "none", panel.grid.major = element_line(colour = "transparent"),
+        plot.title = element_text(hjust = 0.5)) +
+  coord_sf(ylim = c(min(urban_soflo[urban_soflo$EVT_NAME == 1, ]$y),
+                    max(urban_soflo[urban_soflo$EVT_NAME == 1, ]$y)))
+
+ggsave("output/urban_SoFlo.tiff",
+       width = 90, height = 90, units = "mm", compression = "lzw", dpi = 600)
+
+# Plot 2: map of nests (by mig)
+
+urban_rsf_df <- readRDS("input/rsf-data.rds")
+
+nest_locs <- urban_rsf_df %>%
+  filter(group == "South Florida") %>%
+  as.data.frame() %>%
+  dplyr::select(nest_long, nest_lat, choice) %>%
+  distinct() %>%
+  st_as_sf(coords = c("nest_long", "nest_lat"), crs = 4326) %>%
+  st_transform(crs = 32617)
+
+ggplot() +
+  geom_sf(data = se, fill = NA) +
+  geom_sf(data = nest_locs, mapping = aes(col = choice,
+                                          shape = choice),
+          size = 3, alpha = 0.4) +
+  coord_sf() +
+  scale_color_viridis_d(begin = 0.25, end = 0.75) +
+  theme_void() +
+  theme(legend.position = "none", panel.grid.major = element_line(colour = "transparent"),
+        plot.title = element_text(hjust = 0.5)) +
+  coord_sf(ylim = c(min(urban_soflo[urban_soflo$EVT_NAME == 1, ]$y),
+                    max(urban_soflo[urban_soflo$EVT_NAME == 1, ]$y)))
+
+ggsave("output/nests_SoFlo.tiff",
+       width = 90, height = 90, units = "mm", compression = "lzw", dpi = 600)
